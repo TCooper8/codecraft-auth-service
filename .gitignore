@@ -1,0 +1,12 @@
+logs
+target
+/.ensime
+/.idea
+/.idea_modules
+/.classpath
+/.project
+/.settings
+/RUNNING_PID
+**/*.sw*
+
+node_modules
