@@ -21,6 +21,9 @@ case class AuthService(cloud: ICloud) extends IAuthService {
   // Maps from email to token
   var emailToToken = Map.empty[String, String]
 
+  // email to (roleId to Set[permission ids]
+  var authRoles = Map.empty[String, Map[String, Set[String]]]
+
   def uuid = java.util.UUID.randomUUID.toString
 
   // Not thread safe.
@@ -41,8 +44,15 @@ case class AuthService(cloud: ICloud) extends IAuthService {
   def add(cmd: AddAuth): AddAuthReply = this.synchronized {
     auths.get(cmd.email) map { _ =>
       // Already exists.
-      AddAuthReply(None, Some("Email already registered"))
+      AddAuthReply(None, Map.empty, Some("Email already registered"))
     } getOrElse {
+      val roles = authRoles.getOrElse(
+        cmd.email,
+        Map.empty
+      ).map {
+        case (key, permissions) => (key -> permissions.toList)
+      }.toMap
+
       val passwordHash = SecureHash.createHash(
         cmd.password
       )
@@ -54,7 +64,53 @@ case class AuthService(cloud: ICloud) extends IAuthService {
 
       val token = generateToken(cmd.email)
 
-      AddAuthReply(Some(token), None)
+      AddAuthReply(Some(token), roles, None)
+    }
+  }
+
+  def addRole(cmd: AddRole) = this.synchronized {
+    tokenToEmail get (cmd.token) match {
+      case None =>
+        AddRoleReply(None, Some("Token is invalid"))
+      case Some(email) =>
+        // Add the role id to the email's set of roles.
+        var roles = authRoles.getOrElse(email, Map.empty[String, Set[String]])
+        roles get (cmd.id) match {
+          case None =>
+            val newRoles = roles + (cmd.id -> Set.empty[String])
+            authRoles += (email -> newRoles)
+          case _ => ()
+        }
+
+        val token = generateToken(email)
+        AddRoleReply(Some(token), None)
+    }
+  }
+
+  def addPermission(cmd: AddPermission) = this.synchronized {
+    // First, lookup the email from the token.
+    tokenToEmail get (cmd.token) match {
+      case None =>
+        AddPermissionReply(None, Some("Invalid token"))
+      case Some(email) =>
+        val token = generateToken(email)
+
+        // Lookup the role.
+        authRoles get email match {
+          case None =>
+            AddPermissionReply(Some(token), Some("Role does not exist"))
+          case Some(roles) =>
+            // Check if the role exists.
+            roles get (cmd.roleId) match {
+              case None =>
+                AddPermissionReply(Some(token), Some("Role does not exist"))
+              case Some(permissionIds) =>
+                // Add the permission id to the ids.
+                val newRoles = roles + (cmd.roleId -> (permissionIds + cmd.id))
+                authRoles += (email -> newRoles)
+                AddPermissionReply(Some(token), None)
+            }
+        }
     }
   }
 
@@ -62,14 +118,44 @@ case class AuthService(cloud: ICloud) extends IAuthService {
     auths.get (cmd.email) map { auth =>
       invalidateEmailToken(cmd.email)
       val token = generateToken(cmd.email)
+      val roles = authRoles.getOrElse(cmd.email, Map.empty).map{
+        case (key, permissions) => (key -> permissions.toList)
+      }.toMap
 
-      GetAuthReply(Some(token), None)
+      GetAuthReply(Some(token), roles, None)
     } getOrElse {
-      GetAuthReply(None, Some("Auth does not exist"))
+      GetAuthReply(None, Map.empty, Some("Auth does not exist"))
     }
   }
 
-  def consume(cmd: ConsumeToken): ConsumeTokenReply = this.synchronized {
+  def getPermission(cmd: GetPermission): GetPermissionReply = this.synchronized {
+    // First, lookup the email associated with the token.
+    tokenToEmail get (cmd.token) match {
+      case None =>
+        GetPermissionReply(false, None, Some("Invalid token"))
+      case Some(email) =>
+        val token = generateToken(email)
+
+        authRoles get email match {
+          case None => GetPermissionReply(false, Some(token), Some("Role does not exist"))
+          case Some(roles) =>
+            // Check if the role exists.
+            roles get (cmd.roleId) match {
+              case None => GetPermissionReply(false, Some(token), Some("Role does not exist"))
+              case Some(permissions) =>
+                // Check if this id has permission.
+                if (permissions contains (cmd.id)) {
+                  GetPermissionReply(true, Some(token), None)
+                }
+                else {
+                  GetPermissionReply(false, Some(token), Some("Permission denied"))
+                }
+            }
+        }
+    }
+  }
+
+  def consumeToken(cmd: ConsumeToken): ConsumeTokenReply = this.synchronized {
     tokenToEmail get (cmd.token) match {
       case None =>
         ConsumeTokenReply(None, Some("Token is invalid"))
