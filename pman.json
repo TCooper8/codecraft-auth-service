@@ -2,14 +2,13 @@
   "name": "codecraft/auth-service",
   "dependencies": {
     "codecraft/pman": true,
-    "codecraft/codegen": true,
     "codecraft/auth-messages": true,
     "codecraft/cloud": true
   },
   "publish": [
-    "? docker rmi codecraft/auth-service",
-    "sbt compile publish-local docker",
     "? docker rm -f codecraft_auth-service",
+    "? docker rmi codecraft/auth-service",
+    "sbt compile docker",
     "docker run -d --name codecraft_auth-service codecraft/auth-service"
   ]
 }
