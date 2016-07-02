@@ -33,8 +33,6 @@ dockerfile in docker := {
     // Base image
     //from("alpine:3.2")
     from("anapsix/alpine-java")
-    //run("apk --update add openjdk7-jre")
-    //run("apk", "--update", "add", "openjdk7-jre")
     // Add all files on the classpath
     add(classpath.files, "/app/")
     // Add the JAR file
